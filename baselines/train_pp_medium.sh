@@ -1,7 +1,7 @@
 #!/bin/bash
 export OMP_NUM_THREADS=1
 
-python -u run_baselines.py \
+python -u run_macc.py \
   --env_name predator_prey \
   --nagents 5 \
   --dim 10 \
@@ -14,7 +14,7 @@ python -u run_baselines.py \
   --value_coeff 0.01 \
   --detach_gap 10 \
   --lrate 0.001 \
-  --gacomm \
+  --macc \
   --recurrent \
   --save \
   --seed 0 \

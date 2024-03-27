@@ -11,8 +11,9 @@ import visdom
 from comm import CommNetMLP
 from ga_comm import GACommNetMLP
 from tar_comm import TarCommNetMLP
-from trainer import Trainer
 from macc import MACC
+from models import Random, MLP, RNN
+from trainer import Trainer
 
 sys.path.append("..") 
 import data
@@ -149,7 +150,7 @@ if args.gacomm:
         args.comm_action_one = True
 
 if args.macc:
-    args.macc = 1
+    args.commnet = 1
     args.mean_ratio = 0
     if args.env_name == "traffic_junction":
         args.comm_action_one = True

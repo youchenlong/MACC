@@ -8,7 +8,8 @@ sys.path.append("..")
 from action_utils import select_action, translate_action
 
 class MACC(nn.Module):
-    def __init__(self, args):
+    def __init__(self, args, num_inputs):
+        super(MACC, self).__init__()
         self.args = args
         self.nagents = args.nagents
         self.hid_size = args.hid_size
@@ -22,8 +23,8 @@ class MACC(nn.Module):
         else:
             self.action_heads = nn.ModuleList([nn.Linear(args.hid_size, o)
                                         for o in args.naction_heads])
-        # self.init_std = args.init_std if hasattr(args, 'comm_init_std') else 0.2
-        
+        self.init_std = args.init_std if hasattr(args, 'comm_init_std') else 0.2
+
         # Mask for communication
         if self.args.comm_mask_zero:
             self.comm_mask = torch.zeros(self.nagents, self.nagents)
@@ -33,12 +34,10 @@ class MACC(nn.Module):
 
         self.encoder = nn.Linear(num_inputs, args.hid_size)
 
-        # if args.recurrent:
-        #     self.hidd_encoder = nn.Linear(args.hid_size, args.hid_size)
-
         if args.recurrent:
             self.init_hidden(args.batch_size)
             self.f_module = nn.LSTMCell(args.hid_size, args.hid_size)
+
         else:
             if args.share_weights:
                 self.f_module = nn.Linear(args.hid_size, args.hid_size)
@@ -55,7 +54,8 @@ class MACC(nn.Module):
         else:
             self.C_modules = nn.ModuleList([nn.Linear(args.hid_size, args.hid_size)
                                             for _ in range(self.comm_passes)])
-        
+
+        # initialise weights as 0
         if args.comm_init == 'zeros':
             for i in range(self.comm_passes):
                 self.C_modules[i].weight.data.zero_()
@@ -63,7 +63,7 @@ class MACC(nn.Module):
         self.tanh = nn.Tanh()
 
         self.value_head = nn.Linear(self.hid_size, 1)
-        pass
+
 
     def get_agent_mask(self, batch_size, info):
         n = self.nagents
@@ -91,7 +91,6 @@ class MACC(nn.Module):
                 hidden_state, cell_state = extras
             else:
                 hidden_state = extras
-            # hidden_state = self.tanh( self.hidd_encoder(prev_hidden_state) + x)
         else:
             x = self.encoder(x)
             x = self.tanh(x)
@@ -99,9 +98,10 @@ class MACC(nn.Module):
 
         return x, hidden_state, cell_state
 
+
     def forward(self, x, info={}):
         """
-        Forward function of MACC (two rounds of communication)
+        Forward function of MAGIC (two rounds of communication)
 
         Arguments:
             x (list): a list for the input of the communication protocol [observations, (previous hidden states, previous cell states)]
@@ -109,7 +109,7 @@ class MACC(nn.Module):
             previous hidden/cell states (tensor): the hidden/cell states from the previous time steps [n * hid_size]
 
         Returns:
-            action_out (list): a list of tensors of size [1 (batch_size) * n * num_actions] that represent output policy distributions
+            action (list): a list of tensors of size [1 (batch_size) * n * num_actions] that represent output policy distributions
             value_head (tensor): estimated values [n * 1]
             next hidden/cell states (tensor): next hidden/cell states [n * hid_size]
         """
@@ -120,6 +120,14 @@ class MACC(nn.Module):
         n = self.nagents
 
         num_agents_alive, agent_mask = self.get_agent_mask(batch_size, info)
+
+        # Hard Attention - action whether an agent communicates or not
+        if self.args.hard_attn:
+            comm_action = torch.tensor(info['comm_action'])
+            comm_action_mask = comm_action.expand(batch_size, n, n).unsqueeze(-1)
+            # action 1 is talk, 0 is silent i.e. act as dead for comm purposes.
+            agent_mask *= comm_action_mask.double()
+
         agent_mask_transpose = agent_mask.transpose(1, 2)
 
         for i in range(self.comm_passes):
@@ -133,8 +141,8 @@ class MACC(nn.Module):
             mask = self.comm_mask.view(1, n, n)
             mask = mask.expand(comm.shape[0], n, n)
             mask = mask.unsqueeze(-1)
+
             mask = mask.expand_as(comm)
-            
             comm = comm * mask
 
             if hasattr(self.args, 'comm_mode') and self.args.comm_mode == 'avg' \
@@ -182,7 +190,7 @@ class MACC(nn.Module):
             action = (action_mean, action_log_std, action_std)
         else:
             # discrete actions
-            action = [F.log_softmax(head(h), dim=-1) for head in self.heads]
+            action = [F.log_softmax(head(h), dim=-1) for head in self.action_heads]
 
         if self.args.recurrent:
             return action, value_head, (hidden_state.clone(), cell_state.clone())
@@ -190,9 +198,7 @@ class MACC(nn.Module):
             return action, value_head
 
     def init_hidden(self, batch_size):
-        """
-        Function to initialize the hidden states and cell states
-        """
+        # dim 0 = num of layers * num of direction
         return tuple(( torch.zeros(batch_size * self.nagents, self.hid_size, requires_grad=True),
                        torch.zeros(batch_size * self.nagents, self.hid_size, requires_grad=True)))
 
