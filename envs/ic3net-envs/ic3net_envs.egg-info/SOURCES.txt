@@ -1,0 +1,6 @@
+setup.py
+ic3net_envs.egg-info/PKG-INFO
+ic3net_envs.egg-info/SOURCES.txt
+ic3net_envs.egg-info/dependency_links.txt
+ic3net_envs.egg-info/requires.txt
+ic3net_envs.egg-info/top_level.txt
