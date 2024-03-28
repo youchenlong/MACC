@@ -130,11 +130,12 @@ class MACC(nn.Module):
 
         agent_mask_transpose = agent_mask.transpose(1, 2)
 
+        """
+
         for i in range(self.comm_passes):
             # Choose current or prev depending on recurrent
             comm = hidden_state.view(batch_size, n, self.hid_size) if self.args.recurrent else hidden_state
 
-            """
             # Get the next communication vector based on next hidden state
             comm = comm.unsqueeze(-2).expand(-1, n, n, self.hid_size)
 
@@ -159,13 +160,11 @@ class MACC(nn.Module):
             # Combine all of C_j for an ith agent which essentially are h_j
             comm_sum = comm.sum(dim=1)
             c = self.C_modules[i](comm_sum)
-            """
 
 
             if self.args.recurrent:
                 # skip connection - combine comm. matrix and encoded input for all agents
-                # inp = x + c
-                inp = x
+                inp = x + c
 
                 inp = inp.view(batch_size * n, self.hid_size)
 
@@ -177,9 +176,12 @@ class MACC(nn.Module):
             else: # MLP|RNN
                 # Get next hidden state from f node
                 # and Add skip connection from start and sum them
-                # hidden_state = sum([x, self.f_modules[i](hidden_state), c])
-                hidden_state = sum([x, self.f_modules[i](hidden_state)])
+                hidden_state = sum([x, self.f_modules[i](hidden_state), c])
                 hidden_state = self.tanh(hidden_state)
+
+        """
+
+        hidden_state, cell_state = self.f_module(x, (hidden_state, cell_state))
 
         # v = torch.stack([self.value_head(hidden_state[:, i, :]) for i in range(n)])
         # v = v.view(hidden_state.size(0), n, -1)
