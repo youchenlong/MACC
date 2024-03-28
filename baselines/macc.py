@@ -162,12 +162,10 @@ class MACC(nn.Module):
             """
 
 
-            c = self.C_modules[i](comm)
-
-
             if self.args.recurrent:
                 # skip connection - combine comm. matrix and encoded input for all agents
-                inp = x + c
+                # inp = x + c
+                inp = x
 
                 inp = inp.view(batch_size * n, self.hid_size)
 
@@ -179,7 +177,8 @@ class MACC(nn.Module):
             else: # MLP|RNN
                 # Get next hidden state from f node
                 # and Add skip connection from start and sum them
-                hidden_state = sum([x, self.f_modules[i](hidden_state), c])
+                # hidden_state = sum([x, self.f_modules[i](hidden_state), c])
+                hidden_state = sum([x, self.f_modules[i](hidden_state)])
                 hidden_state = self.tanh(hidden_state)
 
         # v = torch.stack([self.value_head(hidden_state[:, i, :]) for i in range(n)])
