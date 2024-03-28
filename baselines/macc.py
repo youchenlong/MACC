@@ -121,70 +121,10 @@ class MACC(nn.Module):
 
         num_agents_alive, agent_mask = self.get_agent_mask(batch_size, info)
 
-        # Hard Attention - action whether an agent communicates or not
-        if self.args.hard_attn:
-            comm_action = torch.tensor(info['comm_action'])
-            comm_action_mask = comm_action.expand(batch_size, n, n).unsqueeze(-1)
-            # action 1 is talk, 0 is silent i.e. act as dead for comm purposes.
-            agent_mask *= comm_action_mask.double()
-
         agent_mask_transpose = agent_mask.transpose(1, 2)
-
-        """
-
-        for i in range(self.comm_passes):
-            # Choose current or prev depending on recurrent
-            comm = hidden_state.view(batch_size, n, self.hid_size) if self.args.recurrent else hidden_state
-
-            # Get the next communication vector based on next hidden state
-            comm = comm.unsqueeze(-2).expand(-1, n, n, self.hid_size)
-
-            # Create mask for masking self communication
-            mask = self.comm_mask.view(1, n, n)
-            mask = mask.expand(comm.shape[0], n, n)
-            mask = mask.unsqueeze(-1)
-
-            mask = mask.expand_as(comm)
-            comm = comm * mask
-
-            if hasattr(self.args, 'comm_mode') and self.args.comm_mode == 'avg' \
-                and num_agents_alive > 1:
-                comm = comm / (num_agents_alive - 1)
-
-            # Mask comm_in
-            # Mask communcation from dead agents
-            comm = comm * agent_mask
-            # Mask communication to dead agents
-            comm = comm * agent_mask_transpose
-
-            # Combine all of C_j for an ith agent which essentially are h_j
-            comm_sum = comm.sum(dim=1)
-            c = self.C_modules[i](comm_sum)
-
-
-            if self.args.recurrent:
-                # skip connection - combine comm. matrix and encoded input for all agents
-                inp = x + c
-
-                inp = inp.view(batch_size * n, self.hid_size)
-
-                output = self.f_module(inp, (hidden_state, cell_state))
-
-                hidden_state = output[0]
-                cell_state = output[1]
-
-            else: # MLP|RNN
-                # Get next hidden state from f node
-                # and Add skip connection from start and sum them
-                hidden_state = sum([x, self.f_modules[i](hidden_state), c])
-                hidden_state = self.tanh(hidden_state)
-
-        """
 
         hidden_state, cell_state = self.f_module(encoded_obs, (hidden_state, cell_state))
 
-        # v = torch.stack([self.value_head(hidden_state[:, i, :]) for i in range(n)])
-        # v = v.view(hidden_state.size(0), n, -1)
         value_head = self.value_head(hidden_state)
         h = hidden_state.view(batch_size, n, self.hid_size)
 
