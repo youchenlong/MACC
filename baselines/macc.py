@@ -114,9 +114,9 @@ class MACC(nn.Module):
             next hidden/cell states (tensor): next hidden/cell states [n * hid_size]
         """
 
-        x, hidden_state, cell_state = self.forward_state_encoder(x)
+        encoded_obs, hidden_state, cell_state = self.forward_state_encoder(x)
 
-        batch_size = x.size()[0]
+        batch_size = encoded_obs.size()[0]
         n = self.nagents
 
         num_agents_alive, agent_mask = self.get_agent_mask(batch_size, info)
@@ -181,7 +181,7 @@ class MACC(nn.Module):
 
         """
 
-        hidden_state, cell_state = self.f_module(x, (hidden_state, cell_state))
+        hidden_state, cell_state = self.f_module(encoded_obs, (hidden_state, cell_state))
 
         # v = torch.stack([self.value_head(hidden_state[:, i, :]) for i in range(n)])
         # v = v.view(hidden_state.size(0), n, -1)
