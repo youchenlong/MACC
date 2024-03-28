@@ -6,6 +6,7 @@ from models import MLP
 import sys 
 sys.path.append("..") 
 from action_utils import select_action, translate_action
+from consensus_builder import ConsensusBuilder
 
 class MACC(nn.Module):
     def __init__(self, args, num_inputs):
@@ -16,15 +17,6 @@ class MACC(nn.Module):
         self.comm_passes = args.comm_passes
         self.recurrent = args.recurrent
 
-        self.continuous = args.continuous
-        if self.continuous:
-            self.action_mean = nn.Linear(args.hid_size, args.dim_actions)
-            self.action_log_std = nn.Parameter(torch.zeros(1, args.dim_actions))
-        else:
-            self.action_heads = nn.ModuleList([nn.Linear(args.hid_size, o)
-                                        for o in args.naction_heads])
-        self.init_std = args.init_std if hasattr(args, 'comm_init_std') else 0.2
-
         # Mask for communication
         if self.args.comm_mask_zero:
             self.comm_mask = torch.zeros(self.nagents, self.nagents)
@@ -32,40 +24,39 @@ class MACC(nn.Module):
             self.comm_mask = torch.ones(self.nagents, self.nagents) \
                             - torch.eye(self.nagents, self.nagents)
 
-        self.encoder = nn.Linear(num_inputs, args.hid_size)
+        self.obs_encoder = nn.Linear(num_inputs, args.hid_size)
 
-        if args.recurrent:
-            self.init_hidden(args.batch_size)
-            self.f_module = nn.LSTMCell(args.hid_size, args.hid_size)
+        self.init_hidden(args.batch_size)
+        self.lstm_cell = nn.LSTMCell(args.hid_size, args.hid_size)
 
+        self.consensus_builder = ConsensusBuilder(args.hid_size, args)
+        # TODO: add consensus_builder_embedding_size in args
+        self.embedding_net = nn.Embedding(args.consensus_builder_size+1, args.consensus_builder_embedding_size)
+        self.latent_consensus_encoder = nn.Sequential(
+            nn.Linear(args.consensus_builder_embedding_size, args.hid_size),
+            nn.ReLU(),
+            nn.Linear(args.hid_size, args.hid_size)
+        )
+
+        self.value_head = nn.Linear(args.hid_size, 1)
+
+        self.continuous = args.continuous
+        if self.continuous:
+            self.action_mean = nn.Linear(args.hid_size, args.dim_actions)
+            self.action_log_std = nn.Parameter(torch.zeros(1, args.dim_actions))
         else:
-            if args.share_weights:
-                self.f_module = nn.Linear(args.hid_size, args.hid_size)
-                self.f_modules = nn.ModuleList([self.f_module
-                                                for _ in range(self.comm_passes)])
-            else:
-                self.f_modules = nn.ModuleList([nn.Linear(args.hid_size, args.hid_size)
-                                                for _ in range(self.comm_passes)])
-
-        if args.share_weights:
-            self.C_module = nn.Linear(args.hid_size, args.hid_size)
-            self.C_modules = nn.ModuleList([self.C_module
-                                            for _ in range(self.comm_passes)])
-        else:
-            self.C_modules = nn.ModuleList([nn.Linear(args.hid_size, args.hid_size)
-                                            for _ in range(self.comm_passes)])
-
-        # initialise weights as 0
-        if args.comm_init == 'zeros':
-            for i in range(self.comm_passes):
-                self.C_modules[i].weight.data.zero_()
-
-        self.tanh = nn.Tanh()
-
-        self.value_head = nn.Linear(self.hid_size, 1)
-
+            self.action_heads = nn.ModuleList([nn.Linear(args.hid_size, o)
+                                        for o in args.naction_heads])
 
     def get_agent_mask(self, batch_size, info):
+        """
+        Function to generate agent mask to mask out inactive agents (only effective in Traffic Junction)
+
+        Returns:
+            num_agents_alive (int): number of active agents
+            agent_mask (tensor): [n, 1]
+        """
+
         n = self.nagents
 
         if 'alive_mask' in info:
@@ -75,28 +66,12 @@ class MACC(nn.Module):
             agent_mask = torch.ones(n)
             num_agents_alive = n
 
-        agent_mask = agent_mask.view(1, 1, n)
-        agent_mask = agent_mask.expand(batch_size, n, n).unsqueeze(-1).clone() # clone gives the full tensor and avoid the error
+        # agent_mask = agent_mask.view(1, 1, n)
+        # agent_mask = agent_mask.expand(batch_size, n, n).unsqueeze(-1).clone() # clone gives the full tensor and avoid the error
+
+        agent_mask = agent_mask.view(n, 1).clone()
 
         return num_agents_alive, agent_mask
-
-    def forward_state_encoder(self, x):
-        hidden_state, cell_state = None, None
-
-        if self.args.recurrent:
-            x, extras = x
-            x = self.encoder(x)
-
-            if self.args.rnn_type == 'LSTM':
-                hidden_state, cell_state = extras
-            else:
-                hidden_state = extras
-        else:
-            x = self.encoder(x)
-            x = self.tanh(x)
-            hidden_state = x
-
-        return x, hidden_state, cell_state
 
 
     def forward(self, x, info={}):
@@ -114,35 +89,39 @@ class MACC(nn.Module):
             next hidden/cell states (tensor): next hidden/cell states [n * hid_size]
         """
 
-        encoded_obs, hidden_state, cell_state = self.forward_state_encoder(x)
+        obs, extras = x
+        encoded_obs = self.obs_encoder(obs)
+        hidden_state, cell_state = extras
 
         batch_size = encoded_obs.size()[0]
         n = self.nagents
 
         num_agents_alive, agent_mask = self.get_agent_mask(batch_size, info)
 
-        agent_mask_transpose = agent_mask.transpose(1, 2)
+        hidden_state, cell_state = self.lstm_cell(encoded_obs, (hidden_state, cell_state))
 
-        hidden_state, cell_state = self.f_module(encoded_obs, (hidden_state, cell_state))
-
-        value_head = self.value_head(hidden_state)
-        h = hidden_state.view(batch_size, n, self.hid_size)
-
+        # TODO: add comm and consensus
+        comm = hidden_state
+        comm = comm * agent_mask
+        with torch.no_grad():
+            latent_consensus_representations = self.consensus_builder.calc_student(comm)
+            latent_consensus_id = F.softmax(latent_consensus_representations, dim=-1).detach().max(-1)[1].unsqueeze(-1)
+            latent_consensus_id[agent_mask.unsqueeze(0).expand(batch_size, -1, -1) == 0] = self.args.consensus_builder_size
+            latent_consensus_embedding = self.embedding_net(latent_consensus_id.squeeze(-1))
+        latent_consensus = self.latent_consensus_encoder(latent_consensus_embedding)
+        latent_consensus = latent_consensus * agent_mask
+     
+        value_head = self.value_head(torch.cat((hidden_state, latent_consensus), dim=-1))
         if self.continuous:
-            action_mean = self.action_mean(h)
+            action_mean = self.action_mean(torch.cat(hidden_state, latent_consensus))
             action_log_std = self.action_log_std.expand_as(action_mean)
             action_std = torch.exp(action_log_std)
-            # will be used later to sample
-            action = (action_mean, action_log_std, action_std)
+            action_out = (action_mean, action_log_std, action_std)
         else:
-            # discrete actions
-            action = [F.log_softmax(head(h), dim=-1) for head in self.action_heads]
+            action_out = [F.log_softmax(action_head(torch.cat((hidden_state, latent_consensus), dim=-1)), dim=-1) for action_head in self.action_heads]
 
-        if self.args.recurrent:
-            return action, value_head, (hidden_state.clone(), cell_state.clone())
-        else:
-            return action, value_head
-
+        return action_out, value_head, (hidden_state.clone(), cell_state.clone())
+    
     def init_hidden(self, batch_size):
         # dim 0 = num of layers * num of direction
         return tuple(( torch.zeros(batch_size * self.nagents, self.hid_size, requires_grad=True),
