@@ -253,6 +253,9 @@ class Trainer(object):
     # only used when nprocesses=1
     def train_batch(self, epoch):
         batch, stat = self.run_batch(epoch)
+
+        # TODO: add contrastive loss
+
         self.optimizer.zero_grad()
 
         s = self.compute_grad(batch)

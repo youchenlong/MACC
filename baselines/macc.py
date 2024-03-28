@@ -30,7 +30,6 @@ class MACC(nn.Module):
         self.lstm_cell = nn.LSTMCell(args.hid_size, args.hid_size)
 
         self.consensus_builder = ConsensusBuilder(args.hid_size, args)
-        # TODO: add consensus_builder_embedding_size in args
         self.embedding_net = nn.Embedding(args.consensus_builder_size+1, args.consensus_builder_embedding_size)
         self.latent_consensus_encoder = nn.Sequential(
             nn.Linear(args.consensus_builder_embedding_size, args.hid_size),

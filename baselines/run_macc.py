@@ -128,6 +128,12 @@ parser.add_argument('--advantages_per_action', default=False, action='store_true
                     help='Whether to multipy log porb for each chosen action with advantages')
 parser.add_argument('--share_weights', default=False, action='store_true',
                     help='Share weights for hops')
+parser.add_argument('--consensus_builder_embedding_size', type=int, default=4,
+                    help="consensus_builder_embedding_size")
+parser.add_argument('--consensus_builder_hid_size', type=int, default=64,
+                    help="consensus_builder_hid_size")
+parser.add_argument('--consensus_builder_size', type=int, default=4,
+                    help="consensus_builder_size")
 
 
 init_args_for_env(parser)

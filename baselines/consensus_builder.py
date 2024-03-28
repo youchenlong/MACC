@@ -17,7 +17,6 @@ class MLP(nn.Module):
 class ConsensusBuilder(nn.Module):
     def __init__(self, hid_size, args):
         super(ConsensusBuilder, self).__init__()
-        # TODO: add consensus_builder_hid_size and consensus_builder_size in args
         self.args = args
         self.hid_size = hid_size
         self.consensus_builder_hid_size = self.args.consensus_builder_hid_size
