@@ -134,6 +134,7 @@ class MACC(nn.Module):
             # Choose current or prev depending on recurrent
             comm = hidden_state.view(batch_size, n, self.hid_size) if self.args.recurrent else hidden_state
 
+            """
             # Get the next communication vector based on next hidden state
             comm = comm.unsqueeze(-2).expand(-1, n, n, self.hid_size)
 
@@ -158,6 +159,10 @@ class MACC(nn.Module):
             # Combine all of C_j for an ith agent which essentially are h_j
             comm_sum = comm.sum(dim=1)
             c = self.C_modules[i](comm_sum)
+            """
+
+
+            c = self.C_modules[i](comm)
 
 
             if self.args.recurrent:
