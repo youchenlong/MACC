@@ -134,6 +134,15 @@ parser.add_argument('--consensus_builder_hid_size', type=int, default=64,
                     help="consensus_builder_hid_size")
 parser.add_argument('--consensus_builder_size', type=int, default=4,
                     help="consensus_builder_size")
+parser.add_argument('--online_temperature', type=float, default=0.1,
+                    help="online_temperature")
+parser.add_argument('--target_temperature', type=float, default=0.04,
+                    help="target_temperature")
+parser.add_argument('--center_tau', type=float, default=0.9,
+                    help="center_tau")
+parser.add_argument('--ema_tau', type=float, default=0.996,
+                    help="ema_tau")
+
 
 
 init_args_for_env(parser)

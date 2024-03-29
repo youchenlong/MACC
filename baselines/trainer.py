@@ -8,7 +8,7 @@ from utils import *
 from action_utils import *
 
 Transition = namedtuple('Transition', ('state', 'action', 'action_out', 'value', 'episode_mask', 'episode_mini_mask', 'next_state',
-                                       'reward', 'misc'))
+                                       'reward', 'misc', 'hidden_state'))
 
 
 class Trainer(object):
@@ -21,6 +21,8 @@ class Trainer(object):
         self.optimizer = optim.RMSprop(policy_net.parameters(),
             lr = args.lrate, alpha=0.97, eps=1e-6)
         self.params = [p for p in self.policy_net.parameters()]
+        self.consensus_builder_optimizer = optim.RMSprop(
+            policy_net.consensus_builder_update_parameters(), lr=args.lrate, alpha=0.97, eps=1e-6)
 
 
     def get_episode(self, epoch):
@@ -111,7 +113,10 @@ class Trainer(object):
             if should_display:
                 self.env.display()
 
-            trans = Transition(state, action, action_out, value, episode_mask, episode_mini_mask, next_state, reward, misc)
+            if self.args.rnn_type == "LSTM":
+                trans = Transition(state, action, action_out, value, episode_mask, episode_mini_mask, next_state, reward, misc, prev_hid[0])
+            else:
+                trans = Transition(state, action, action_out, value, episode_mask, episode_mini_mask, next_state, reward, misc, prev_hid)
             episode.append(trans)
             state = next_state
             if done:
@@ -134,6 +139,36 @@ class Trainer(object):
         if hasattr(self.env, 'get_stat'):
             merge_stat(self.env.get_stat(), stat)
         return (episode, stat)
+    
+    def compute_contrastive_loss(self, batch):
+        self.consensus_builder_optimizer.zero_grad()
+        
+        # alive_masks: [bs * n]
+        alive_masks = torch.Tensor(np.concatenate([item['alive_mask'] for item in batch.misc])).view(-1)
+        # hidden_state: [bs * n * hid_size]
+        hidden_state = torch.Tensor(batch.hidden_state)
+        # hidden_state = torch.masked_select(hidden_state, alive_masks.unsqueeze(-1).expand(-1, -1, self.args.hid_size))
+        hidden_state = hidden_state * alive_masks.unsqueeze(-1).expand(-1, -1, self.args.hid_size)
+        # student_projection: [bs * n * cb_size]
+        online_projection = self.policy_net.consensus_builder.calc_student(hidden_state)
+        # teacher_projection_z: [bs * n * cb_size]
+        target_projection = self.policy_net.consensus_builder.calc_teacher(hidden_state)
+        centering_teacher_projection = target_projection - self.policy_net.center.detach()
+        online_projection_z = F.log_softmax(online_projection / self.args.online_temperature, dim=-1)
+        target_projection_z = F.softmax(centering_teacher_projection / self.args.target_temperature, dim=-1)
+        # contrastive_loss: [bs * n * n]
+        contrastive_loss = - torch.bmm(target_projection_z.detach(), online_projection_z.transpose(1, 2))
+        # contrastive_loss = torch.masked_select(contrastive_loss, alive_masks.unsqueeze(1).expand(-1, self.args.nagents, -1))
+        contrastive_loss = contrastive_loss * alive_masks.unsqueeze(1).expand(-1, self.args.nagents, -1)
+        contrastive_loss = contrastive_loss.sum()
+        
+        contrastive_loss.backward()
+
+        self.consensus_builder_optimizer.step()
+
+        self.policy_net.center = (self.args.center_tau * self.policy_net.center + (1 - self.args.center_tau) * target_projection.detach().mean(0, keepdim=True)).detach()
+        self.policy_net.consensus_builder.update_targets()
+
 
     def compute_grad(self, batch):
         stat = dict()
@@ -254,10 +289,9 @@ class Trainer(object):
     def train_batch(self, epoch):
         batch, stat = self.run_batch(epoch)
 
-        # TODO: add contrastive loss
+        self.compute_contrastive_loss(batch)
 
         self.optimizer.zero_grad()
-
         s = self.compute_grad(batch)
         merge_stat(s, stat)
         for p in self.params:
