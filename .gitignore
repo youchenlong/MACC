@@ -1,2 +1,4 @@
 /baselines/saved/
+/baselines/__pycache__/
+/saved/
 *.log
