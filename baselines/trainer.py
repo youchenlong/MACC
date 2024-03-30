@@ -165,7 +165,7 @@ class Trainer(object):
         # contrastive_loss: [bs * n * n]
         contrastive_loss = - torch.bmm(target_projection_z.detach(), online_projection_z.transpose(1, 2))
         contrastive_loss = contrastive_loss * alive_masks.unsqueeze(1).expand(-1, self.args.nagents, -1)
-        contrastive_loss = contrastive_loss.sum() / (batch_size * n * n)
+        contrastive_loss = self.args.contrastive_coeff * contrastive_loss.sum() / (batch_size * n * n)
         stat['contrastive_loss'] = contrastive_loss.item()
         
         contrastive_loss.backward()

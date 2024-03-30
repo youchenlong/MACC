@@ -24,32 +24,40 @@ class ConsensusBuilder(nn.Module):
         self.consensus_builder_size = args.consensus_builder_size
 
         # student
-        # self.state2query = nn.Linear(hid_size, 32)
-        # self.state2key = nn.Linear(hid_size, 32)
-        # self.state2value = nn.Linear(hid_size, self.consensus_builder_hid_size)
-        self.encoder_net = MLP(hid_size, self.consensus_builder_hid_size * 2, self.consensus_builder_hid_size)
+        self.state2query = nn.Linear(hid_size, 32)
+        self.state2key = nn.Linear(hid_size, 32)
+        self.state2value = nn.Linear(hid_size, self.consensus_builder_hid_size)
         self.project_net = MLP(self.consensus_builder_hid_size, self.consensus_builder_hid_size, self.consensus_builder_size)
 
         # teacher
-        # self.teacher_state2query = nn.Linear(hid_size, 32)
-        # self.teacher_state2key = nn.Linear(hid_size, 32)
-        # self.teacher_state2value = nn.Linear(hid_size, self.consensus_builder_hid_size)
-        self.teacher_encoder_net = MLP(hid_size, self.consensus_builder_hid_size * 2, self.consensus_builder_hid_size)
+        self.teacher_state2query = nn.Linear(hid_size, 32)
+        self.teacher_state2key = nn.Linear(hid_size, 32)
+        self.teacher_state2value = nn.Linear(hid_size, self.consensus_builder_hid_size)
         self.teacher_project_net = MLP(self.consensus_builder_hid_size, self.consensus_builder_hid_size, self.consensus_builder_size)
 
     def calc_student(self, inputs):
         """
         inputs: [bs * n * hid_size]
         """
-        representation = self.encoder_net(inputs)
-        projection = self.project_net(representation)
-        return projection
+        query = self.state2query(inputs)
+        key = self.state2key(inputs)
+        value = self.state2value(inputs)
+        scores = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(self.hid_size)
+        attn = F.softmax(scores, dim=-1)
+        representation = torch.matmul(attn, value)
+        project = self.project_net(representation)
+        return project
     
     def calc_teacher(self, inputs):
         """
         inputs: [bs * n * hid_size]
         """
-        representation = self.teacher_encoder_net(inputs)
+        query = self.teacher_state2query(inputs)
+        key = self.teacher_state2key(inputs)
+        value = self.teacher_state2value(inputs)
+        scores = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(self.hid_size)
+        attn = F.softmax(scores, dim=-1)
+        representation = torch.matmul(attn, value)
         projection = self.teacher_project_net(representation)
         return projection
     
@@ -58,11 +66,14 @@ class ConsensusBuilder(nn.Module):
             param_t.data = param_t.data * self.args.ema_tau + param_o.data * (1. - self.args.ema_tau)
     
     def update_targets(self):
-        self.EMA(self.encoder_net, self.teacher_encoder_net)
+        self.EMA(self.state2query, self.teacher_state2query)
+        self.EMA(self.state2key, self.teacher_state2key)
+        self.EMA(self.state2value, self.teacher_state2value)
         self.EMA(self.project_net, self.teacher_project_net)
 
     def update_parameters(self):
-        return list(self.encoder_net.parameters()) + list(self.project_net.parameters())
+        return list(self.state2query.parameters()) + list(self.state2key.parameters()) + \
+               list(self.state2value.parameters()) + list(self.project_net.parameters())
     
 
 if __name__ == "__main__":
