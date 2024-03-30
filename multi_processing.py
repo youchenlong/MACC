@@ -78,6 +78,10 @@ class MultiProcessTrainer(object):
 
         # run its own trainer
         batch, stat = self.trainer.run_batch(epoch)
+
+        s = self.trainer.compute_contrastive_loss(batch)
+        merge_stat(s, stat)
+
         self.trainer.optimizer.zero_grad()
         s = self.trainer.compute_grad(batch)
         merge_stat(s, stat)

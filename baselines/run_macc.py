@@ -343,7 +343,11 @@ def run(num_epochs):
         if 'density1' in stat.keys():
             print('density1: {:.4f}'.format(stat['density1']))
         if 'density2' in stat.keys():
-            print('density2: {:.4f}'.format(stat['density2']))        
+            print('density2: {:.4f}'.format(stat['density2']))    
+        if 'contrastive_loss' in stat.keys():
+            print('contrastive_loss: {}'.format(stat['contrastive_loss']))
+        if 'action_loss' in stat.keys():
+            print('action_loss: {}'.format(stat['action_loss']))     
 
 
         if args.plot:

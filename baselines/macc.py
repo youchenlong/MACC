@@ -82,7 +82,7 @@ class MACC(nn.Module):
         # print(hidden_state.shape, cell_state.shape)
         hidden_state, cell_state = self.lstm_cell(encoded_obs.squeeze(), (hidden_state, cell_state))
 
-        # comm: [bs, n, hid_size]
+        # comm: [bs * n * hid_size]
         comm = hidden_state.view(batch_size, n, self.hid_size)
 
         # mask communication from dead agents (only effective in Traffic Junction)
@@ -115,8 +115,13 @@ class MACC(nn.Module):
         return tuple(( torch.zeros(batch_size * self.nagents, self.hid_size, requires_grad=True),
                        torch.zeros(batch_size * self.nagents, self.hid_size, requires_grad=True)))
     
+    def parameters(self):
+        params = []
+        for name, param in self.named_parameters():
+            if "consensus_builder" in name:
+                continue
+            params.append(param)
+        return params
 
     def consensus_builder_update_parameters(self):
         return self.consensus_builder.update_parameters()
-        pass
-

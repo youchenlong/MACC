@@ -141,33 +141,41 @@ class Trainer(object):
         return (episode, stat)
     
     def compute_contrastive_loss(self, batch):
+        stat = dict()
+
         self.consensus_builder_optimizer.zero_grad()
+
+        n = self.args.nagents
+        batch_size = len(batch.state)
         
+        # TODO: get alive_masks and hidden_state properly
         # alive_masks: [bs * n]
-        alive_masks = torch.Tensor(np.concatenate([item['alive_mask'] for item in batch.misc])).view(-1)
+        alive_masks = torch.Tensor([item['alive_mask'] for item in batch.misc]).detach()
         # hidden_state: [bs * n * hid_size]
-        hidden_state = torch.Tensor(batch.hidden_state)
-        # hidden_state = torch.masked_select(hidden_state, alive_masks.unsqueeze(-1).expand(-1, -1, self.args.hid_size))
+        hidden_state = torch.cat(batch.hidden_state).view(batch_size, n, -1).detach()
         hidden_state = hidden_state * alive_masks.unsqueeze(-1).expand(-1, -1, self.args.hid_size)
-        # student_projection: [bs * n * cb_size]
+        # online_projection: [bs * n * cb_size]
         online_projection = self.policy_net.consensus_builder.calc_student(hidden_state)
-        # teacher_projection_z: [bs * n * cb_size]
+        # target_projection_z: [bs * n * cb_size]
         target_projection = self.policy_net.consensus_builder.calc_teacher(hidden_state)
-        centering_teacher_projection = target_projection - self.policy_net.center.detach()
+        centering_target_projection = target_projection - self.policy_net.center.detach()
         online_projection_z = F.log_softmax(online_projection / self.args.online_temperature, dim=-1)
-        target_projection_z = F.softmax(centering_teacher_projection / self.args.target_temperature, dim=-1)
+        target_projection_z = F.softmax(centering_target_projection / self.args.target_temperature, dim=-1)
+        # cross entropy loss
         # contrastive_loss: [bs * n * n]
         contrastive_loss = - torch.bmm(target_projection_z.detach(), online_projection_z.transpose(1, 2))
-        # contrastive_loss = torch.masked_select(contrastive_loss, alive_masks.unsqueeze(1).expand(-1, self.args.nagents, -1))
         contrastive_loss = contrastive_loss * alive_masks.unsqueeze(1).expand(-1, self.args.nagents, -1)
-        contrastive_loss = contrastive_loss.sum()
+        contrastive_loss = contrastive_loss.sum() / (batch_size * n * n)
+        stat['contrastive_loss'] = contrastive_loss.item()
         
         contrastive_loss.backward()
 
         self.consensus_builder_optimizer.step()
 
-        self.policy_net.center = (self.args.center_tau * self.policy_net.center + (1 - self.args.center_tau) * target_projection.detach().mean(0, keepdim=True)).detach()
+        self.policy_net.center = (self.args.center_tau * self.policy_net.center + (1 - self.args.center_tau) * target_projection.mean(0, keepdim=True)).detach()
         self.policy_net.consensus_builder.update_targets()
+
+        return stat
 
 
     def compute_grad(self, batch):
@@ -184,16 +192,12 @@ class Trainer(object):
         actions = torch.Tensor(batch.action)
         actions = actions.transpose(1, 2).view(-1, n, dim_actions)
 
-        # old_actions = torch.Tensor(np.concatenate(batch.action, 0))
-        # old_actions = old_actions.view(-1, n, dim_actions)
-        # print(old_actions == actions)
-
         # can't do batch forward.
         values = torch.cat(batch.value, dim=0)
         action_out = list(zip(*batch.action_out))
         action_out = [torch.cat(a, dim=0) for a in action_out]
 
-        alive_masks = torch.Tensor(np.concatenate([item['alive_mask'] for item in batch.misc])).view(-1)
+        alive_masks = torch.Tensor(np.concatenate([item['alive_mask'] for item in batch.misc]))
 
         coop_returns = torch.Tensor(batch_size, n)
         ncoop_returns = torch.Tensor(batch_size, n)
@@ -289,7 +293,8 @@ class Trainer(object):
     def train_batch(self, epoch):
         batch, stat = self.run_batch(epoch)
 
-        self.compute_contrastive_loss(batch)
+        s = self.compute_contrastive_loss(batch)
+        merge_stat(s, stat)
 
         self.optimizer.zero_grad()
         s = self.compute_grad(batch)
