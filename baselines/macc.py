@@ -78,8 +78,6 @@ class MACC(nn.Module):
         # agent_mask: [n * 1]
         num_agents_alive, agent_mask = self.get_agent_mask(batch_size, info)
 
-        # print(obs.shape, encoded_obs.shape)
-        # print(hidden_state.shape, cell_state.shape)
         hidden_state, cell_state = self.lstm_cell(encoded_obs.squeeze(), (hidden_state, cell_state))
 
         # comm: [bs * n * hid_size]
@@ -93,18 +91,18 @@ class MACC(nn.Module):
             latent_consensus_projection = self.consensus_builder.calc_student(comm)
             # latent_consensus_id: [bs * n * 1]
             latent_consensus_id = F.softmax(latent_consensus_projection, dim=-1).detach().max(-1)[1].unsqueeze(-1)
-            # print(latent_consensus_id.shape, (agent_mask.unsqueeze(0).expand(batch_size, -1, -1)).shape)
-            latent_consensus_id[agent_mask.unsqueeze(0).expand(batch_size, -1, -1) == 0] = self.args.consensus_builder_size
+            # latent_consensus_id[agent_mask.unsqueeze(0).expand(batch_size, -1, -1) == 0] = self.args.consensus_builder_size
+            latent_consensus_id = latent_consensus_id * agent_mask.unsqueeze(0).expand(batch_size, -1, -1)
             # latent_consensus_embedding: [bs * n * cb_size]
             latent_consensus_embedding = self.embedding_net(latent_consensus_id.squeeze(-1))
         # latent_consensus: [bs * n * hid_size]
-        latent_consensus = self.latent_consensus_encoder(latent_consensus_embedding)
+        comm = self.latent_consensus_encoder(latent_consensus_embedding)
 
         # mask communication to dead agents (only effective in Traffic Junction)
-        latent_consensus = latent_consensus * agent_mask
+        comm = comm * agent_mask
      
         h = hidden_state.view(batch_size, n, self.hid_size)
-        c = latent_consensus.view(batch_size, n, self.hid_size)
+        c = comm.view(batch_size, n, self.hid_size)
         value_head = self.value_head(torch.cat((h, c), dim=-1))
         action_out = [F.log_softmax(action_head(torch.cat((h, c), dim=-1)), dim=-1) for action_head in self.action_heads]
 

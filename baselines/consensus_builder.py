@@ -24,14 +24,14 @@ class ConsensusBuilder(nn.Module):
         self.consensus_builder_size = args.consensus_builder_size
 
         # student
-        self.state2query = nn.Linear(hid_size, 16)
-        self.state2key = nn.Linear(hid_size, 16)
+        self.state2query = nn.Linear(hid_size, 32)
+        self.state2key = nn.Linear(hid_size, 32)
         self.state2value = nn.Linear(hid_size, self.consensus_builder_hid_size)
         self.project_net = MLP(self.consensus_builder_hid_size, self.consensus_builder_hid_size, self.consensus_builder_size)
 
         # teacher
-        self.teacher_state2query = nn.Linear(hid_size, 16)
-        self.teacher_state2key = nn.Linear(hid_size, 16)
+        self.teacher_state2query = nn.Linear(hid_size, 32)
+        self.teacher_state2key = nn.Linear(hid_size, 32)
         self.teacher_state2value = nn.Linear(hid_size, self.consensus_builder_hid_size)
         self.teacher_project_net = MLP(self.consensus_builder_hid_size, self.consensus_builder_hid_size, self.consensus_builder_size)
 

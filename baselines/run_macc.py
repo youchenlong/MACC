@@ -142,6 +142,8 @@ parser.add_argument('--center_tau', type=float, default=0.9,
                     help="center_tau")
 parser.add_argument('--ema_tau', type=float, default=0.996,
                     help="ema_tau")
+parser.add_argument('--consensus_builder_lrate', type=float, default=0.005,
+                    help="consensus_builder_lrate")
 
 
 
