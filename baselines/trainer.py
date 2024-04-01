@@ -148,7 +148,6 @@ class Trainer(object):
         n = self.args.nagents
         batch_size = len(batch.state)
         
-        # TODO: get alive_masks and hidden_state properly
         # alive_masks: [bs * n]
         alive_masks = torch.Tensor([item['alive_mask'] for item in batch.misc]).detach()
         # hidden_state: [bs * n * hid_size]

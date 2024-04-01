@@ -135,8 +135,6 @@ class MACC(nn.Module):
         # agent_mask: [n * 1]
         num_agents_alive, agent_mask = self.get_agent_mask(batch_size, info)
 
-        hidden_state, cell_state = self.lstm_cell(encoded_obs.squeeze(), (hidden_state, cell_state))
-
         # comm: [bs * n * hid_size]
         comm = hidden_state.view(batch_size, n, self.hid_size)
 
@@ -148,7 +146,7 @@ class MACC(nn.Module):
             latent_consensus_projection = self.consensus_builder.calc_student(comm)
             # latent_consensus_id: [bs * n * 1]
             latent_consensus_id = F.softmax(latent_consensus_projection, dim=-1).detach().max(-1)[1].unsqueeze(-1)
-            latent_consensus_id[agent_mask.unsqueeze(0).expand(batch_size, -1, -1) == 0] = self.args.consensus_builder_size
+            # latent_consensus_id[agent_mask.unsqueeze(0).expand(batch_size, -1, -1) == 0] = self.args.consensus_builder_size
             # latent_consensus_embedding: [bs * n * cb_size]
             latent_consensus_embedding = self.embedding_net(latent_consensus_id.squeeze(-1))
         # latent_consensus: [bs * n * hid_size]
@@ -156,6 +154,12 @@ class MACC(nn.Module):
 
         # mask communication to dead agents (only effective in Traffic Junction)
         comm = comm * agent_mask
+
+        # inp: [bs * n * hid_size]
+        inp = encoded_obs
+        # inp: [(bs * n) * hid_size]
+        inp = inp.view(batch_size * n, self.hid_size)
+        hidden_state, cell_state = self.lstm_cell(inp, (hidden_state, cell_state))
      
         h = hidden_state.view(batch_size, n, self.hid_size)
         c = comm.view(batch_size, n, self.hid_size)
