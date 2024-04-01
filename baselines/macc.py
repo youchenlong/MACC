@@ -22,8 +22,11 @@ class MACC(nn.Module):
         self.init_hidden(args.batch_size)
         self.lstm_cell = nn.LSTMCell(args.hid_size, args.hid_size)
 
-        self.value_head = nn.Linear(args.hid_size, 1)
-        self.action_heads = nn.ModuleList([nn.Linear(args.hid_size, o) for o in args.naction_heads])
+        # self.value_head = nn.Linear(args.hid_size, 1)
+        # self.action_heads = nn.ModuleList([nn.Linear(args.hid_size, o) for o in args.naction_heads])
+
+        self.value_head = nn.Linear(args.hid_size * 2, 1)
+        self.action_heads = nn.ModuleList([nn.Linear(args.hid_size * 2, o) for o in args.naction_heads])
 
 
     def get_agent_mask(self, batch_size, info):
@@ -58,33 +61,48 @@ class MACC(nn.Module):
         """
 
         obs, extras = x
+        # encoded_obs: [bs * n * hid_size]
         encoded_obs = self.obs_encoder(obs)
+        # hidden_state: [(bs * n) * hid_size]
         hidden_state, cell_state = extras
 
         batch_size = encoded_obs.size()[0]
         n = self.nagents
 
+        # agent_mask: [bs * n * n * 1]
         num_agents_alive, agent_mask = self.get_agent_mask(batch_size, info)
+        # agent_mask_alive: [bs * n * n * 1]
         agent_mask_alive = agent_mask.clone()
+        # agent_mask_transpose: [bs * n * n * 1]
         agent_mask_trasnpose = agent_mask.transpose(1, 2)
 
+        # comm: [bs * n * hid_size]
         comm = hidden_state.view(batch_size, n, self.hid_size)
+        # comm: [bs * n * n * hid_size]
         comm = comm.unsqueeze(-2).expand(-1, n, n, self.hid_size)
         comm = comm * agent_mask_alive
         comm = comm * agent_mask_trasnpose
         comm_sum = comm.sum(dim=1)
+        # c: [bs * n * hid_size]
         c = self.message_encoder(comm_sum)
 
+        """
+        # inp: [bs * n * hid_size]
         inp = encoded_obs + c
+        # inp: [(bs * n) * hid_size]
+        inp = inp.view(batch_size * n, self.hid_size)
+        hidden_state, cell_state = self.lstm_cell(inp, (hidden_state, cell_state))
+        """
+
+        # inp: [bs * n * hid_size]
+        inp = encoded_obs
+        # inp: [(bs * n) * hid_size]
         inp = inp.view(batch_size * n, self.hid_size)
         hidden_state, cell_state = self.lstm_cell(inp, (hidden_state, cell_state))
 
-        # hidden_state, cell_state = self.lstm_cell(encoded_obs.squeeze(), (hidden_state, cell_state))
-
-        value_head = self.value_head(hidden_state)
-
         h = hidden_state.view(batch_size, n, self.hid_size)
-        action_out = [F.log_softmax(head(h), dim=-1) for head in self.action_heads]
+        value_head = self.value_head(torch.cat((h, c), dim=-1))
+        action_out = [F.log_softmax(head(torch.cat((h, c), dim=-1)), dim=-1) for head in self.action_heads]
 
         return action_out, value_head, (hidden_state.clone(), cell_state.clone())
 
